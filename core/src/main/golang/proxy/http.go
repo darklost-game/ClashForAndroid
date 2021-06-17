@@ -7,13 +7,13 @@ import (
 	"sync"
 	"time"
 
-	adapters "github.com/Dreamacro/clash/adapters/inbound"
+	"github.com/Dreamacro/clash/adapter/inbound"
 	"github.com/Dreamacro/clash/log"
 	"github.com/Dreamacro/clash/tunnel"
 )
 
 const (
-	LocalHttpTimeout = time.Millisecond * 100
+	LocalHttpTimeout = time.Minute * 5
 )
 
 var listener *httpListener
@@ -55,7 +55,7 @@ func Start(listen string) (listenAt string, err error) {
 
 			_ = conn.(*net.TCPConn).SetKeepAlive(false)
 
-			h.handleConn(conn)
+			go h.handleConn(conn)
 		}
 	}()
 
@@ -89,8 +89,10 @@ func (l *httpListener) handleConn(conn net.Conn) {
 	if err != nil || request.URL.Host == "" {
 		if err != nil {
 			log.Warnln("HTTP Connection closed: %s", err.Error())
+		} else {
+			log.Warnln("HTTP Connection closed: unknown host")
 		}
-		
+
 		_ = conn.Close()
 		return
 	}
@@ -100,9 +102,9 @@ func (l *httpListener) handleConn(conn net.Conn) {
 		if err != nil {
 			return
 		}
-		tunnel.Add(adapters.NewHTTPS(request, conn))
+		tunnel.Add(inbound.NewHTTPS(request, conn))
 		return
 	}
 
-	tunnel.Add(adapters.NewHTTP(request, conn))
+	tunnel.Add(inbound.NewHTTP(request, conn))
 }
