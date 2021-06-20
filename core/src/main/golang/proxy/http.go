@@ -1,29 +1,14 @@
 package proxy
 
 import (
-	"bufio"
-	"net"
-	"net/http"
 	"sync"
-	"time"
 
-	"github.com/Dreamacro/clash/adapter/inbound"
-	"github.com/Dreamacro/clash/log"
+	"github.com/Dreamacro/clash/listener/http"
 	"github.com/Dreamacro/clash/tunnel"
 )
 
-const (
-	LocalHttpTimeout = time.Minute * 5
-)
-
-var listener *httpListener
+var listener *http.Listener
 var lock sync.Mutex
-
-type httpListener struct {
-	net.Listener
-
-	closed bool
-}
 
 func Start(listen string) (listenAt string, err error) {
 	lock.Lock()
@@ -31,35 +16,12 @@ func Start(listen string) (listenAt string, err error) {
 
 	stopLocked()
 
-	l, err := net.Listen("tcp", listen)
-	if err != nil {
-		log.Errorln("Listen HTTP proxy at: %s: %s", listen, err.Error())
-
-		return
+	listener, err = http.NewWithAuthenticate(listen, tunnel.TCPIn(), false)
+	if err == nil {
+		listenAt = listener.Listener().Addr().String()
 	}
 
-	h := &httpListener{
-		Listener: l,
-		closed:   false,
-	}
-
-	listener = h
-
-	go func() {
-		for !h.closed {
-			conn, err := h.Accept()
-			if err != nil {
-				log.Warnln("Accept connection: %s", err.Error())
-				continue
-			}
-
-			_ = conn.(*net.TCPConn).SetKeepAlive(false)
-
-			go h.handleConn(conn)
-		}
-	}()
-
-	return h.Addr().String(), nil
+	return
 }
 
 func Stop() {
@@ -71,40 +33,8 @@ func Stop() {
 
 func stopLocked() {
 	if listener != nil {
-		listener.closed = true
-		_ = listener.Close()
+		listener.Close()
 	}
 
 	listener = nil
-}
-
-func (l *httpListener) handleConn(conn net.Conn) {
-	_ = conn.SetReadDeadline(time.Now().Add(LocalHttpTimeout))
-
-	br := bufio.NewReader(conn)
-	request, err := http.ReadRequest(br)
-
-	_ = conn.SetReadDeadline(time.Time{})
-
-	if err != nil || request.URL.Host == "" {
-		if err != nil {
-			log.Warnln("HTTP Connection closed: %s", err.Error())
-		} else {
-			log.Warnln("HTTP Connection closed: unknown host")
-		}
-
-		_ = conn.Close()
-		return
-	}
-
-	if request.Method == http.MethodConnect {
-		_, err := conn.Write([]byte("HTTP/1.1 200 Connection established\r\n\r\n"))
-		if err != nil {
-			return
-		}
-		tunnel.Add(inbound.NewHTTPS(request, conn))
-		return
-	}
-
-	tunnel.Add(inbound.NewHTTP(request, conn))
 }
